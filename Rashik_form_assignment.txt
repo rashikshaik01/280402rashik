@@ -1,0 +1,145 @@
+*&---------------------------------------------------------------------*
+*& Report Z280402_REPORT_ADOBE_ASSIGN
+*&---------------------------------------------------------------------*
+*& Developer Name: RASHIK SHAIK.                                    *
+*&                                                                     *
+*& Object Description: Adobe Smart Form assignment to
+*&                     get invoice Document                            *
+*&
+*&                                                                     *
+*& FS Object Id  : MM-12345.                                           *
+*&                                                                     *
+*&*& Transport Request: S4HK905168.                                    *
+*&                                                                     *
+*& Object Creation Date: 01.06.2024                                    *
+*&                                                                     *
+*& Functional Moudle : Sales & Distribution.                                             *
+*&---------------------------------------------------------------------*
+*&---------------------------------------------------------------------*
+
+
+REPORT Z280402_REPORT_ADOBE_ASSIGN NO STANDARD PAGE HEADING MESSAGE-ID Z280402_MSG_CLASS.
+
+include z280402_inc_top.
+
+
+
+START-OF-SELECTION.
+
+select vbeln , fkart , fkdat , gbstk , kunag
+  into table @data(gt_vbrk)
+  from vbrk inner join kna1 on vbrk~kunag = kna1~kunnr
+  where vbeln in @s_vbeln and fkart = 'F2' AND fkdat in @s_fkdat and gbstk = 'C' and vbrk~kunag in @s_kunnr.
+*  cl_demo_output=>display( gt_vbrk ).
+
+
+IF gt_vbrk[] IS not INITIAL.
+  SELECT vbrp~VBELN , vbrp~POSNR , aubel , aupos , vbrp~vgbel , vbrp~vgpos , vbrp~matnr , fkimg , vbrp~vrkme , vbrp~netwr , vbrp~waerk
+    into table @data(gt_vbrp)
+    from vbrp inner join vbap on vbrp~aubel = vbap~vbeln
+    FOR ALL ENTRIES IN @gt_vbrk
+    where vbrp~vbeln = @gt_vbrk-vbeln.
+*    cl_demo_output=>display( gt_vbrp ).
+
+ select name1 , name2 , ort01 , pstlz , land1
+    into table @gs_structure
+    from kna1
+    FOR ALL ENTRIES IN @gt_vbrk
+    where kunnr in @s_kunnr and kna1~kunnr = @gt_vbrk-kunag.
+*   cl_demo_output=>display( gs_structure ).
+
+ else.
+   CLEAR: gt_vbrk, gt_vbrp.
+   MESSAGE e002.
+
+endif.
+
+
+IF gt_vbrk IS NOT INITIAL.
+    SORT gt_vbrk BY vbeln.
+    SORT gt_vbrp BY vbeln.
+    DATA(gv_index) = VALUE syst_tabix( ).
+    LOOP AT gt_vbrk ASSIGNING FIELD-SYMBOL(<lfs_vbrk>).
+      APPEND INITIAL LINE TO gt_final ASSIGNING FIELD-SYMBOL(<gfs_final>).
+      MOVE-CORRESPONDING <lfs_vbrk> TO <gfs_final>.
+
+    READ TABLE gt_vbrp TRANSPORTING NO FIELDS
+      WITH KEY vbeln = <lfs_vbrk>-vbeln BINARY SEARCH.
+
+      IF sy-subrc IS INITIAL.
+        gv_index = sy-tabix.
+
+        LOOP AT gt_vbrp ASSIGNING FIELD-SYMBOL(<lfs_vbrp>) FROM gv_index.
+          IF <lfs_vbrp>-vbeln NE <lfs_vbrk>-vbeln.
+            EXIT.
+          ENDIF.
+          APPEND INITIAL LINE TO <gfs_final>-LINEITEM ASSIGNING FIELD-SYMBOL(<lfs_items>).
+          MOVE-CORRESPONDING <lfs_vbrp> TO <lfs_items>.
+        ENDLOOP.
+      ENDIF.
+    ENDLOOP.
+endif.
+
+*cl_demo_output=>display( gt_final ).
+
+wA_OUTPARAMS-deVICE = 'PRINTER'.
+  wA_OUTPARAMS-dest = 'LP01'.
+  wA_OUTPARAMS-nodialog = 'X'.
+  wA_OUTPARAMS-preview = 'X'.
+
+
+  CALL FUNCTION 'FP_JOB_OPEN'
+    CHANGING
+      ie_outputparams       = WA_OUTPARAMS
+*   EXCEPTIONS
+*     CANCEL                = 1
+*     USAGE_ERROR           = 2
+*     SYSTEM_ERROR          = 3
+*     INTERNAL_ERROR        = 4
+*     OTHERS                = 5
+            .
+  IF sy-subrc <> 0.
+* Implement suitable error handling here
+  ENDIF.
+
+  CALL FUNCTION 'FP_FUNCTION_MODULE_NAME'
+    EXPORTING
+      i_name                     = 'Z280402_INVOICE_FORM_ASSIGN'
+   IMPORTING
+     E_FUNCNAME                 = fmname
+*     E_INTERFACE_TYPE           =
+*     EV_FUNCNAME_INBOUND        =
+            .
+
+CALL FUNCTION  fmname "'/1BCDWB/SM00001035'
+  EXPORTING
+*   /1BCDWB/DOCPARAMS        =
+    gt_tab                   = gt_final
+    gt_custdetails           = gs_structure
+* IMPORTING
+*   /1BCDWB/FORMOUTPUT       =
+* EXCEPTIONS
+*   USAGE_ERROR              = 1
+*   SYSTEM_ERROR             = 2
+*   INTERNAL_ERROR           = 3
+*   OTHERS                   = 4
+          .
+IF sy-subrc <> 0.
+* Implement suitable error handling here
+ENDIF.
+
+
+
+
+  CALL FUNCTION 'FP_JOB_CLOSE'
+*   IMPORTING
+*     E_RESULT             =
+*   EXCEPTIONS
+*     USAGE_ERROR          = 1
+*     SYSTEM_ERROR         = 2
+*     INTERNAL_ERROR       = 3
+*     OTHERS               = 4
+            .
+  IF sy-subrc <> 0.
+* Implement suitable error handling here
+  ENDIF.
